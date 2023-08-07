@@ -1,0 +1,38 @@
+name: build-and-deploy-serverless-functions
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v3
+
+      - name: setup dotnet environment
+        uses: actions/setup-dotnet@v2
+        with:
+          dotnet-version: 6.0
+
+      - name: build project
+        shell: bash
+        run: |
+          pushd './${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
+          dotnet build --configuration Release --output ./output
+          popd
+
+      - name: 'Run Azure Functions Action'
+        uses: Azure/functions-action@v1
+        id: fa
+        with:
+          app-name: 'portfolio-data-aggregate'
+          slot-name: 'production'
+          package: '${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/output'
+          publish-profile: ${{ secrets.AZURE_FUNCTION_PUBLISHPROFILE }}

@@ -17,41 +17,50 @@ using System.Collections.Generic;
 
 namespace portfolio_data_aggregate
 {
-    public static class RepositoryLanguageData
+    public class RepositoryLanguageData
     {
-        private static HttpClient _githubClient = new HttpClient()
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ILanguageDataCache _languageDataCache;
+
+        public RepositoryLanguageData(IHttpClientFactory httpContextFactory, ILanguageDataCache languageDataCache)
         {
-            BaseAddress = new Uri("https://api.github.com/repos/"),
-        };
+            _httpClientFactory = httpContextFactory;
+            _languageDataCache = languageDataCache;
+        }
 
         [FunctionName("RepositoryLanguages")]
-        public static async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Function, "get", Route = null)] HttpRequest req, ILogger log)
+        public async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Function, "get", Route = null)] HttpRequest req, ILogger log)
         {
             string user = req.Query["user"];
             string repo = req.Query["repo"];
             if (string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(repo)) return new BadRequestObjectResult("No user or repo provided");
             string repositoryURI = WebPath.Combine(user, repo);
 
-            // TODO: Add cache for the result to reduce subsequent requests
-
-            // Add user agent, as GitHub requires it
-            _githubClient.DefaultRequestHeaders.UserAgent.ParseAdd("Azure Function");
-
+            // Try getting data from cache
+            string cacheKey = $"{user}/{repo}";
+            if (_languageDataCache.TryGetValue(cacheKey, out Dictionary<string, int> cacheValue))
+            {
+                return new OkObjectResult(cacheValue);
+            }
+            
+            // If data was not in cache, obtain it from GitHub
+            var githubClient = _httpClientFactory.CreateClient("GitHub");
             // Find all connected repositories, e.g. any submodules
             // First get the latest commit sha
             string commitURI = WebPath.Combine(repositoryURI, "/commits?page=1&per_page=1");
-            var commit = (await _githubClient.GetFromJsonAsync<GetCommitResponse[]>(commitURI)).ElementAtOrDefault(0);
+            var commit = (await githubClient.GetFromJsonAsync<GetCommitResponse[]>(commitURI)).ElementAtOrDefault(0);
             if (commit is null) return new BadRequestObjectResult("Could not find given repository with any commits");
+
             // Now get the commit tree
             string treeURI = WebPath.Combine(repositoryURI, $"/git/trees/{commit.commit.tree.sha}");
-            var tree = await _githubClient.GetFromJsonAsync<GetTreeResponse>(treeURI);
+            var tree = await githubClient.GetFromJsonAsync<GetTreeResponse>(treeURI);
             var submodules = tree.tree.Where(t => t.mode == "160000").Select(m => WebPath.Combine(user, m.path)).ToList();
 
             // Now get the repository language data of all submodules and projects
             // It will be expected that the path is the same as repository name, this is not necessary but will reduce the amount of calls required to GitHub
             submodules.Add(repositoryURI);
             var languageURIs = submodules.Select(m => WebPath.Combine(m, "/languages"));
-            var languageTasks = languageURIs.Select(uri => _githubClient.GetFromJsonAsync<Dictionary<string, int>>(uri));
+            var languageTasks = languageURIs.Select(uri => githubClient.GetFromJsonAsync<Dictionary<string, int>>(uri));
             var languageResults = await Task.WhenAll(languageTasks);
 
             var LanguageData = languageResults
@@ -61,6 +70,9 @@ namespace portfolio_data_aggregate
                 .GroupBy(kvp => kvp.Key)
                 // Convert back to a single dictionary with the groups merged
                 .ToDictionary(g => g.Key, g => g.Sum(kvp => kvp.Value));
+
+            // Set data into cache to limit calls to GitHub
+            _languageDataCache.TrySetValue(cacheKey, LanguageData);
 
             return new OkObjectResult(LanguageData);
         }

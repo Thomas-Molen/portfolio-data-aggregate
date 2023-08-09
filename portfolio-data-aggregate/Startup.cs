@@ -1,6 +1,6 @@
 ﻿using Microsoft.Azure.Functions.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
-using portfolio_data_aggregate.Utility;
+using portfolio_data_aggregate.Cache;
 
 [assembly: FunctionsStartup(typeof(portfolio_data_aggregate.Startup))]
 namespace portfolio_data_aggregate

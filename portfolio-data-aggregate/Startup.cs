@@ -1,5 +1,6 @@
 ﻿using Microsoft.Azure.Functions.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
+using portfolio_data_aggregate.Cache;
 using portfolio_data_aggregate.Utility;
 
 [assembly: FunctionsStartup(typeof(portfolio_data_aggregate.Startup))]
@@ -16,7 +17,8 @@ namespace portfolio_data_aggregate
             });
 
             builder.Services.AddMemoryCache();
-            builder.Services.AddSingleton<ILanguageDataCache, MemoryLanguageDataCache>();
+            builder.Services.AddSingleton<IRedisCacheConnector, RedisCacheConnector>();
+            builder.Services.AddSingleton<ILanguageDataCache, RedisLanguageDataCache>();
         }
     }
 }
